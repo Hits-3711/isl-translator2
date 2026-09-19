@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ISL Live Translator</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; margin-top: 50px; }
+        video { border-radius: 10px; transform: scaleX(-1); border: 4px solid #333; }
+        #result-box { 
+            margin: 20px auto; width: 400px; padding: 15px; font-size: 24px; font-weight: bold; 
+            border-radius: 8px; color: white; background: #333; 
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Indian Sign Language Live Translator</h1>
+    <p>Perform signs in front of your camera</p>
+
+    <video id="webcam" autoplay playsinline width="640" height="480"></video>
+    <div id="result-box">Initializing Camera...</div>
+
+    <script src="script.js"></script>
+</body>
+</html>
