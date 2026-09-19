@@ -1,99 +1,104 @@
-import streamlit as st
+import pickle
 import cv2
 import mediapipe as mp
 import numpy as np
-import pickle
-import os
+import streamlit as st
 
-# 1. Page Configuration
-st.set_page_config(page_title="ISL Live Translator", page_icon="🤟", layout="centered")
+# Page configuration
+st.set_page_config(
+    page_title="ISL Translator", page_icon="🤟", layout="centered"
+)
 
-st.title("🤟 Indian Sign Language Live Translator")
-st.write("Perform signs in front of your camera to translate them in real-time.")
+st.title("🤟 Indian Sign Language (ISL) Translator")
+st.write(
+    "Capture an image of your sign using the camera below to translate it"
+    " instantly!"
+)
 
-# 2. Load the Model & Encoder Safely
+
+# Load model and label encoder safely
 @st.cache_resource
 def load_model():
-    model_path = "isl_model.p"  # Make sure isl_model.p is in the same folder as app.py
-    if not os.path.exists(model_path):
-        return None, None
-    
-    with open(model_path, 'rb') as f:
-        data = pickle.load(f)
-    
-    # Handle dictionary style or tuple style pickles depending on how it was saved
-    if isinstance(data, dict):
-        return data.get("model"), data.get("label_encoder")
-    else:
-        return data[0], data[1]
+  with open("isl_model.p", "rb") as f:
+    data = pickle.load(f)
+  return data["model"], data["labels_encoder"]
 
-model, label_encoder = load_model()
 
-if model is None:
-    st.error("⚠️ `isl_model.p` not found! Please place your model file in the project folder.")
-else:
-    st.success("Model loaded successfully!")
+try:
+  model, label_encoder = load_model()
+except Exception as e:
+  st.error(f"Error loading model file (`isl_model.p`): {e}")
+  st.stop()
 
-# 3. Initialize MediaPipe Hands
+# Initialize MediaPipe Hands
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
-hands = mp_hands.Hands(static_image_mode=False, max_num_hands=2, min_detection_confidence=0.5, min_tracking_confidence=0.5)
+hands = mp_hands.Hands(
+    static_image_mode=True, max_num_hands=2, min_detection_confidence=0.5
+)
 
-# 4. WebRTC or Camera Input Setup
-image_file = st.camera_input("Take a picture / Stream Camera")
+# Streamlit camera input widget
+img_file_buffer = st.camera_input("Take a picture of your sign")
 
-if image_file is not None:
-    # Convert the file buffer to an OpenCV image
-    bytes_data = image_file.getvalue()
-    np_arr = np.frombuffer(bytes_data, np.uint8)
-    frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-    
-    # Flip frame horizontally for a natural mirror view
-    frame = cv2.flip(frame, 1)
-    H, W, _ = frame.shape
-    
-    # Convert BGR to RGB for MediaPipe
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    results = hands.process(rgb_frame)
-    
-    prediction_text = "No hand detected"
-    
-    if results.multi_hand_landmarks:
-        for hand_landmarks in results.multi_hand_landmarks:
-            # Draw landmarks on the frame
-            mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
-            
-            # Extract coordinates matching feature extraction logic
-            data_aux = []
-            x_ = []
-            y_ = []
-            
-            for landmark in hand_landmarks.landmark:
-                x_.append(landmark.x)
-                y_.append(landmark.y)
-                
-            for landmark in hand_landmarks.landmark:
-                data_aux.append(landmark.x - min(x_))
-                data_aux.append(landmark.y - min(y_))
-                
-            # Predict using the loaded model if feature length matches
-            if model is not None and len(data_aux) > 0:
-                try:
-                    # Ensure input is shaped correctly as a 2D array for XGBoost
-                    input_data = np.asarray(data_aux).reshape(1, -1)
-                    
-                    prediction = model.predict(input_data)
-                    
-                    # Handle Label Encoder or direct prediction output
-                    if label_encoder is not None:
-                        predicted_character = label_encoder.inverse_transform(prediction)
-                        prediction_text = str(predicted_character[0])
-                    else:
-                        prediction_text = str(prediction[0])
-                        
-                except Exception as e:
-                    prediction_text = f"Error: {str(e)}"
+if img_file_buffer is not None:
+  # Convert the uploaded buffer to an OpenCV image
+  bytes_data = img_file_buffer.getvalue()
+  cv2_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
 
-    # Display results in Streamlit UI
-    st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
-    st.markdown(f"### Prediction: **{prediction_text}**")
+  img_rgb = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB)
+  results = hands.process(img_rgb)
+  data_aux = []
+
+  if results.multi_hand_landmarks:
+    for hand_landmarks in results.multi_hand_landmarks:
+      # Draw hand landmarks on the image for visual feedback
+      mp_drawing.draw_landmarks(
+          cv2_img,
+          hand_landmarks,
+          mp_hands.HAND_CONNECTIONS,
+          mp_drawing.DrawingSpec(
+              color=(0, 255, 0), thickness=2, circle_radius=2
+          ),
+          mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=2, circle_radius=2),
+      )
+
+      # Extract X and Y coordinates for all 21 landmarks per hand
+      for i in range(len(hand_landmarks.landmark)):
+        x = hand_landmarks.landmark[i].x
+        y = hand_landmarks.landmark[i].y
+        data_aux.append(x)
+        data_aux.append(y)
+
+    # Display the processed image with drawn landmarks
+    st.image(
+        cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB),
+        channels="RGB",
+        use_container_width=True,
+    )
+
+    # Ensure feature vector matches the model's expected size (162 features)
+    EXPECTED_FEATURES = 162
+    if len(data_aux) < EXPECTED_FEATURES:
+      data_aux.extend([0.0] * (EXPECTED_FEATURES - len(data_aux)))
+    elif len(data_aux) > EXPECTED_FEATURES:
+      data_aux = data_aux[:EXPECTED_FEATURES]
+
+    try:
+      # Make prediction
+      prediction = model.predict([np.asarray(data_aux)])
+
+      # Decode prediction if label encoder is available
+      if label_encoder is not None:
+        predicted_character = label_encoder.inverse_transform(prediction)[0]
+      else:
+        predicted_character = str(prediction[0])
+
+      st.success(f"### Prediction: {predicted_character}")
+
+    except Exception as e:
+      st.error(f"Prediction Error: {e}")
+  else:
+    st.warning(
+        "No hands detected in the frame. Please make sure your hand is clearly"
+        " visible."
+    )
