@@ -16,7 +16,7 @@ st.write(
 )
 
 
-# Load model safely
+# Load model and data flexibly
 @st.cache_resource
 def load_model_and_data():
   with open("isl_model.p", "rb") as f:
@@ -30,7 +30,7 @@ except Exception as e:
   st.error(f"Error loading model file (`isl_model.p`): {e}")
   st.stop()
 
-# Parse model and labels dynamically, including model.classes_ fallback
+# Parse model and labels dynamically
 model = None
 labels = None
 
@@ -45,7 +45,7 @@ if isinstance(raw_data, dict):
 else:
   model = raw_data
 
-# Fallback: if separate labels weren't found, try getting classes directly from the trained model
+# Fallback: if separate labels weren't found, try getting classes directly from the model
 if labels is None and model is not None and hasattr(model, "classes_"):
   labels = model.classes_
 
@@ -81,14 +81,17 @@ if img_file_buffer is not None:
           mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=2, circle_radius=2),
       )
 
-      # Extract X and Y coordinates
+      x_, y_ = [], []
       for i in range(len(hand_landmarks.landmark)):
-        x = hand_landmarks.landmark[i].x
-        y = hand_landmarks.landmark[i].y
-        data_aux.append(x)
-        data_aux.append(y)
+        x_.append(hand_landmarks.landmark[i].x)
+        y_.append(hand_landmarks.landmark[i].y)
 
-    # Display processed image
+      # Extract relative coordinates (relative to wrist landmark 0)
+      for i in range(len(hand_landmarks.landmark)):
+        data_aux.append(hand_landmarks.landmark[i].x - x_[0])
+        data_aux.append(hand_landmarks.landmark[i].y - y_[0])
+
+    # Display processed image with drawn landmarks
     st.image(
         cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB),
         channels="RGB",
@@ -107,7 +110,7 @@ if img_file_buffer is not None:
       prediction = model.predict([np.asarray(data_aux)])
       pred_idx = prediction[0]
 
-      # Decode label safely using classes_ or label encoder
+      # Decode label safely
       predicted_name = str(pred_idx)
       if labels is not None:
         if hasattr(labels, "inverse_transform"):
