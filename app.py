@@ -16,7 +16,7 @@ st.write(
 )
 
 
-# Load model and diagnostics safely
+# Load model safely
 @st.cache_resource
 def load_model_and_data():
   with open("isl_model.p", "rb") as f:
@@ -30,7 +30,7 @@ except Exception as e:
   st.error(f"Error loading model file (`isl_model.p`): {e}")
   st.stop()
 
-# Parse model and label mappings dynamically
+# Parse model and labels dynamically, including model.classes_ fallback
 model = None
 labels = None
 
@@ -42,13 +42,12 @@ if isinstance(raw_data, dict):
       or raw_data.get("labels")
       or raw_data.get("output_labels")
   )
-  with st.expander("🔍 Model Debug Info (Expand to check keys)"):
-    st.write("Pickle dictionary keys found:", list(raw_data.keys()))
-    st.write("Labels object type:", type(labels))
 else:
   model = raw_data
-  with st.expander("🔍 Model Debug Info"):
-    st.write("Pickle file is a raw model object (not a dictionary).")
+
+# Fallback: if separate labels weren't found, try getting classes directly from the trained model
+if labels is None and model is not None and hasattr(model, "classes_"):
+  labels = model.classes_
 
 # Initialize MediaPipe Hands
 mp_hands = mp.solutions.hands
@@ -108,7 +107,7 @@ if img_file_buffer is not None:
       prediction = model.predict([np.asarray(data_aux)])
       pred_idx = prediction[0]
 
-      # Decode label safely
+      # Decode label safely using classes_ or label encoder
       predicted_name = str(pred_idx)
       if labels is not None:
         if hasattr(labels, "inverse_transform"):
