@@ -16,12 +16,22 @@ st.write(
 )
 
 
-# Load model and label encoder safely
+# Load model and labels flexibly to handle any pickle file structure
 @st.cache_resource
 def load_model():
   with open("isl_model.p", "rb") as f:
     data = pickle.load(f)
-  return data["model"], data["labels_encoder"]
+
+  if isinstance(data, dict):
+    model = data.get("model") or data.get("clf")
+    label_encoder = (
+        data.get("labels_encoder")
+        or data.get("label_encoder")
+        or data.get("labels")
+    )
+    return model, label_encoder
+  else:
+    return data, None
 
 
 try:
@@ -62,14 +72,14 @@ if img_file_buffer is not None:
           mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=2, circle_radius=2),
       )
 
-      # Extract X and Y coordinates for all 21 landmarks per hand
+      # Extract X and Y coordinates for all landmarks
       for i in range(len(hand_landmarks.landmark)):
         x = hand_landmarks.landmark[i].x
         y = hand_landmarks.landmark[i].y
         data_aux.append(x)
         data_aux.append(y)
 
-    # Display the processed image with drawn landmarks
+    # Display processed image with drawn landmarks
     st.image(
         cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB),
         channels="RGB",
@@ -87,9 +97,14 @@ if img_file_buffer is not None:
       # Make prediction
       prediction = model.predict([np.asarray(data_aux)])
 
-      # Decode prediction if label encoder is available
+      # Decode prediction safely
       if label_encoder is not None:
-        predicted_character = label_encoder.inverse_transform(prediction)[0]
+        if hasattr(label_encoder, "inverse_transform"):
+          predicted_character = label_encoder.inverse_transform(prediction)[0]
+        elif isinstance(label_encoder, (list, np.ndarray)):
+          predicted_character = label_encoder[int(prediction[0])]
+        else:
+          predicted_character = str(prediction[0])
       else:
         predicted_character = str(prediction[0])
 
