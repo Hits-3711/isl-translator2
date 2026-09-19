@@ -16,29 +16,39 @@ st.write(
 )
 
 
-# Load model and labels flexibly to handle any pickle file structure
+# Load model and diagnostics safely
 @st.cache_resource
-def load_model():
+def load_model_and_data():
   with open("isl_model.p", "rb") as f:
     data = pickle.load(f)
-
-  if isinstance(data, dict):
-    model = data.get("model") or data.get("clf")
-    label_encoder = (
-        data.get("labels_encoder")
-        or data.get("label_encoder")
-        or data.get("labels")
-    )
-    return model, label_encoder
-  else:
-    return data, None
+  return data
 
 
 try:
-  model, label_encoder = load_model()
+  raw_data = load_model_and_data()
 except Exception as e:
   st.error(f"Error loading model file (`isl_model.p`): {e}")
   st.stop()
+
+# Parse model and label mappings dynamically
+model = None
+labels = None
+
+if isinstance(raw_data, dict):
+  model = raw_data.get("model") or raw_data.get("clf")
+  labels = (
+      raw_data.get("labels_encoder")
+      or raw_data.get("label_encoder")
+      or raw_data.get("labels")
+      or raw_data.get("output_labels")
+  )
+  with st.expander("🔍 Model Debug Info (Expand to check keys)"):
+    st.write("Pickle dictionary keys found:", list(raw_data.keys()))
+    st.write("Labels object type:", type(labels))
+else:
+  model = raw_data
+  with st.expander("🔍 Model Debug Info"):
+    st.write("Pickle file is a raw model object (not a dictionary).")
 
 # Initialize MediaPipe Hands
 mp_hands = mp.solutions.hands
@@ -51,7 +61,7 @@ hands = mp_hands.Hands(
 img_file_buffer = st.camera_input("Take a picture of your sign")
 
 if img_file_buffer is not None:
-  # Convert the uploaded buffer to an OpenCV image
+  # Convert uploaded buffer to an OpenCV image
   bytes_data = img_file_buffer.getvalue()
   cv2_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
 
@@ -61,7 +71,7 @@ if img_file_buffer is not None:
 
   if results.multi_hand_landmarks:
     for hand_landmarks in results.multi_hand_landmarks:
-      # Draw hand landmarks on the image for visual feedback
+      # Draw hand landmarks for visual feedback
       mp_drawing.draw_landmarks(
           cv2_img,
           hand_landmarks,
@@ -72,14 +82,14 @@ if img_file_buffer is not None:
           mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=2, circle_radius=2),
       )
 
-      # Extract X and Y coordinates for all landmarks
+      # Extract X and Y coordinates
       for i in range(len(hand_landmarks.landmark)):
         x = hand_landmarks.landmark[i].x
         y = hand_landmarks.landmark[i].y
         data_aux.append(x)
         data_aux.append(y)
 
-    # Display processed image with drawn landmarks
+    # Display processed image
     st.image(
         cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB),
         channels="RGB",
@@ -96,19 +106,21 @@ if img_file_buffer is not None:
     try:
       # Make prediction
       prediction = model.predict([np.asarray(data_aux)])
+      pred_idx = prediction[0]
 
-      # Decode prediction safely
-      if label_encoder is not None:
-        if hasattr(label_encoder, "inverse_transform"):
-          predicted_character = label_encoder.inverse_transform(prediction)[0]
-        elif isinstance(label_encoder, (list, np.ndarray)):
-          predicted_character = label_encoder[int(prediction[0])]
-        else:
-          predicted_character = str(prediction[0])
-      else:
-        predicted_character = str(prediction[0])
+      # Decode label safely
+      predicted_name = str(pred_idx)
+      if labels is not None:
+        if hasattr(labels, "inverse_transform"):
+          predicted_name = labels.inverse_transform(prediction)[0]
+        elif isinstance(labels, (list, np.ndarray)) and int(pred_idx) < len(
+            labels
+        ):
+          predicted_name = labels[int(pred_idx)]
+        elif isinstance(labels, dict):
+          predicted_name = labels.get(pred_idx, str(pred_idx))
 
-      st.success(f"### Prediction: {predicted_character}")
+      st.success(f"### Prediction: {predicted_name}")
 
     except Exception as e:
       st.error(f"Prediction Error: {e}")
