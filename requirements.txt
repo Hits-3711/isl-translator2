@@ -2,4 +2,5 @@ streamlit
 opencv-python-headless
 mediapipe
 xgboost
+scikit-learn
 numpy
